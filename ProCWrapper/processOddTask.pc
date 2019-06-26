@@ -1,0 +1,18 @@
+#define SQLCA_STORAGE_CLASS extern
+#include <sqlca.h>
+#include <stdio.h>
+
+
+EXEC SQL INCLUDE proc_all.h;
+
+void processOddTask(int task, int thid, sql_context ctx)
+{
+	EXEC SQL CONTEXT USE : ctx;
+	EXEC SQL BEGIN DECLARE SECTION;
+	int cal = 0;
+	int value = 0;
+	EXEC SQL END DECLARE SECTION;
+	cal = 3 * task;
+	EXEC SQL SELECT : cal INTO : value FROM DUAL;
+	printf("Thread[%d], %d * 3 = %d\n", thid, task, cal);
+}

@@ -1,0 +1,15 @@
+#define SQLCA_STORAGE_CLASS extern
+#include <sqlca.h>
+#include <stdio.h>
+
+
+EXEC SQL INCLUDE proc_all.h;
+
+void processAll(int task, int thid, sql_context ctx)
+{
+	int i = task % 2;
+	if (i == 0)
+		processEvenTask(task, thid, ctx);
+	else
+		processOddTask(task, thid, ctx);
+}

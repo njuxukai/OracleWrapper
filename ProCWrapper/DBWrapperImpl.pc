@@ -1,0 +1,139 @@
+#include <iostream>
+
+//#define SQLCA_STORAGE_CLASS extern
+#include <sqlca.h>
+
+
+EXEC SQL INCLUDE DBWrapperImpl.h;
+EXEC SQL INCLUDE proc_all.h;
+
+
+void err_report(const char* msg)
+{
+	if (sqlca.sqlcode != 0)
+	{
+		printf("%s[%d][%.*s]", msg, sqlca.sqlcode, sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+		exit(0);
+	}
+}
+
+DBWrapper::SPtr DBWrapper::CreateWrapper()
+{
+	return std::make_shared<DBWrapperImpl>();
+}
+
+
+
+
+void DBWrapperImpl::sworker(ThreadParameter* parameter)
+{
+	DBWrapperImpl* wrapper = (DBWrapperImpl*)parameter->wrapper;
+	sql_context ctx = (sql_context)(*((sql_context*)parameter->pctx));
+	int threadid = parameter->thid;
+	wrapper->worker(threadid, ctx);
+
+}
+
+
+DBWrapperImpl::DBWrapperImpl() : m_done(false), m_threadCount(5), m_joiner(new JoinThreads(m_threads))
+{
+	initContexts();
+	initThreads();
+}
+
+DBWrapperImpl::~DBWrapperImpl()
+{
+	m_done = true;
+	if (m_joiner)
+	{
+		delete m_joiner;
+		m_joiner = 0;
+	}
+	freeContexts();
+}
+
+
+void DBWrapperImpl::submit(int t)
+{
+	m_taskQueue.push(t);
+}
+
+void DBWrapperImpl::initContexts()
+{
+	m_ctxes = new sql_context[m_threadCount];
+	
+
+	EXEC SQL BEGIN DECLARE SECTION;
+	char connString[40];
+	EXEC SQL END DECLARE SECTION;
+	strcpy_s(connString, CONN_STRING);
+
+	EXEC SQL ENABLE THREADS;
+	
+	for (int i = 0; i < m_threadCount; i++)
+	{
+		EXEC SQL CONTEXT ALLOCATE : m_ctxes[i];
+		EXEC SQL CONTEXT USE : m_ctxes[i];
+		EXEC SQL CONNECT : connString;
+		if (sqlca.sqlcode == 0)
+			printf("Logon succeed!\n");
+	}
+
+	m_threadParameters = new ThreadParameter[m_threadCount];
+	for (int i = 0; i < m_threadCount; i++)
+	{
+		m_threadParameters[i].wrapper = (void*)this;
+		m_threadParameters[i].pctx = (void*)&(m_ctxes[i]);
+		m_threadParameters[i].thid = i;
+	}
+
+}
+
+void DBWrapperImpl::freeContexts()
+{
+	if (m_ctxes)
+	{
+		for (int i = 0; i < m_threadCount; i++)
+		{
+			EXEC SQL WHENEVER SQLERROR DO err_report("RELEASE ERROR");
+			EXEC SQL CONTEXT USE :m_ctxes[i];
+			EXEC SQL COMMIT WORK RELEASE;
+			printf("Logged off!\n");
+		}
+		delete[] m_ctxes;
+		m_ctxes = nullptr;
+	}
+	if (m_threadParameters)
+	{
+		delete[] m_threadParameters;
+		m_threadParameters = nullptr;
+	}
+}
+
+void DBWrapperImpl::initThreads()
+{
+	for (int i = 0; i < m_threadCount; i++)
+	{
+		m_threads.push_back(std::thread(&DBWrapperImpl::sworker, &m_threadParameters[i]));
+	}
+}
+
+
+void DBWrapperImpl::worker(int thid, sql_context ctx)
+{
+	while (!m_done || !m_taskQueue.empty())
+	{
+		auto task = m_taskQueue.wait_and_pop(20);
+		if (task.get())
+		{
+			processTask(*task, thid, ctx);
+		}
+	}
+}
+
+void DBWrapperImpl::processTask(int task, int thid, sql_context ctx)
+{
+	
+		processAll(task, thid, ctx);
+	
+}
